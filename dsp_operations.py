@@ -1,4 +1,5 @@
 import os
+import math
 
 
 def read_signal_file(file_path):
@@ -61,6 +62,33 @@ def subtract_signals(sig1, sig2):
     res_indices = sorted(sample_map.keys())
     res_values = [sample_map[n] for n in res_indices]
     return res_indices, res_values
+
+
+def generate_sinusoidal_signal(wave_type, amplitude, phase_shift_deg, analog_freq, sampling_freq, duration=1.0):
+    """
+    Generates discrete sinusoidal/cosinusoidal signal.
+    x(n) = A * sin(2*pi*(f/fs)*n + theta) or A * cos(2*pi*(f/fs)*n + theta)
+    """
+    if sampling_freq <= 0:
+        raise ValueError("Sampling frequency must be greater than zero.")
+
+    # Convert phase shift from degrees to radians
+    phase_rad = math.radians(phase_shift_deg)
+
+    # Total samples N = duration * sampling_frequency
+    N = int(sampling_freq * duration)
+    indices = list(range(N))
+    values = []
+
+    for n in indices:
+        angle = 2 * math.pi * (analog_freq / sampling_freq) * n + phase_rad
+        if wave_type.lower() == 'sine':
+            val = amplitude * math.sin(angle)
+        else:
+            val = amplitude * math.cos(angle)
+        values.append(round(val, 6))
+
+    return indices, values
 
 
 if __name__ == "__main__":
