@@ -1,5 +1,6 @@
 import os
 import math
+import numpy as np
 
 
 def read_signal_file(file_path):
@@ -90,6 +91,185 @@ def generate_sinusoidal_signal(wave_type, amplitude, phase_shift_deg, analog_fre
 
     return indices, values
 
+def quantize_signal(indices, values, levels=None, bits=None):
+
+    x = np.asarray(values, dtype=float)
+
+    if x.size == 0:
+        raise ValueError("The signal is empty.")
+
+    if not np.all(np.isfinite(x)):
+        raise ValueError("Signal values must be finite numbers.")
+
+    # 1. Determine levels and bits
+    if bits is not None:
+        if not isinstance(bits, int) or not 1 <= bits <= 16:
+            raise ValueError("Bits must be an integer from 1 to 16.")
+
+        levels = 2 ** bits
+
+    elif levels is not None:
+        if not isinstance(levels, int) or not 2 <= levels <= 65536:
+            raise ValueError("Levels must be an integer from 2 to 65536.")
+
+        bits = math.ceil(math.log2(levels))
+
+    else:
+        raise ValueError("Specify either levels or bits.")
+
+    # 2. Find minimum and maximum
+    xmin = float(np.min(x))
+    xmax = float(np.max(x))
+
+
+    # 3. Calculate step size
+    step = (xmax - xmin) / levels
+
+    # 4. Create intervals
+    level_ranges = []
+
+    for i in range(levels):
+        lower = xmin + i * step
+        upper = xmin + (i + 1) * step
+        midpoint = (lower + upper) / 2
+
+        level_ranges.append({
+            "lower": lower,
+            "upper": upper,
+            "midpoint": midpoint
+        })
+
+    # 5. Find the interval of each sample
+    interval_indices = []
+    quantized = []
+
+    for sample in x:
+        for i in range(levels):
+
+            lower = level_ranges[i]["lower"]
+            upper = level_ranges[i]["upper"]
+            midpoint = level_ranges[i]["midpoint"]
+
+            if lower <= sample < upper:
+                interval_indices.append(i + 1)
+                quantized.append(midpoint)
+                break
+            elif i == levels - 1 and np.isclose(sample, upper):
+                interval_indices.append(i + 1)
+                quantized.append(midpoint)
+                break
+
+    interval_indices = np.array(interval_indices)
+    quantized = np.array(quantized)
+
+    # 6. Calculate errors
+    errors = quantized - x
+    squared_errors = errors ** 2
+
+    average_error_power = float(np.mean(squared_errors))
+
+    # 7. Generate binary codes
+    codes = [
+        format(int(index) - 1, f"0{bits}b")
+        for index in interval_indices
+    ]
+
+    # 8. Build output table
+    table_rows = []
+
+    for i in range(len(x)):
+        table_rows.append((
+            int(indices[i]),
+            float(x[i]),
+            int(interval_indices[i]),
+            float(quantized[i]),
+            float(errors[i]),
+            float(squared_errors[i]),
+            codes[i]
+        ))
+
+    # 9. Return results
+    return (
+        table_rows,
+        quantized.tolist(),
+        errors.tolist(),
+        squared_errors.tolist(),
+        codes,
+        average_error_power
+    )
+
+def moving_average(indices, values, window_size):
+    if not 1 <= window_size <= len(values):
+        raise ValueError("Invalid window size")
+
+    result_indices = []
+    result_values = []
+
+    for i in range(len(values) - window_size + 1):
+        total = 0
+
+        for j in range(window_size):
+            total += values[i + j]
+
+        average = total / window_size
+
+        result_indices.append(indices[i])
+        result_values.append(average)
+
+    return result_indices, result_values
+
+
+def first_derivative(indices, values):
+    if len(values) < 2:
+        raise ValueError("At least 2 samples required")
+
+    result_indices = []
+    result_values = []
+
+    for i in range(len(values) - 1):
+        result_indices.append(indices[i])
+        result_values.append(values[i + 1] - values[i])
+
+    return result_indices, result_values
+
+
+
+def second_derivative(indices, values):
+    if len(values) < 3:
+        raise ValueError("At least 3 samples required")
+
+    result_indices = []
+    result_values = []
+
+    for i in range(len(values) - 2):
+        result_indices.append(indices[i])
+
+        result_values.append(
+            values[i + 2] - 2 * values[i + 1] + values[i]
+        )
+
+    return result_indices, result_values
+
+def convolve_signals(indices1, values1, indices2, values2):
+    if not values1 or not values2:
+        raise ValueError("Signals cannot be empty")
+
+    output_length = len(values1) + len(values2) - 1
+
+    result_values = [0] * output_length
+
+    for i in range(len(values1)):
+        for j in range(len(values2)):
+            result_values[i + j] += values1[i] * values2[j]
+
+    start_index = indices1[0] + indices2[0]
+
+    result_indices = list(
+        range(start_index, start_index + output_length)
+    )
+
+    return result_indices, result_values
+
 
 if __name__ == "__main__":
     print("--- Running Staff Verification Tests ---\n")
@@ -99,7 +279,8 @@ if __name__ == "__main__":
         SubSignalSamplesAreEqual,
         MultiplySignalByConst,
         ShiftSignalByConst,
-        Folding
+        Folding,
+        CompareSignals
     )
 
     # Load test signals
@@ -135,5 +316,83 @@ if __name__ == "__main__":
     # 6. Folding Test
     fold_n, fold_x = fold_signal(n1, x1)
     Folding(fold_n, fold_x)
+
+
+    # Moving Average Test 1: Window Size = 3
+    indices, values = read_signal_file("MovingAvg_input.txt")
+
+    result_indices, result_values = moving_average(
+        indices, values, 3
+    )
+
+    print("\nMoving Average Test 1 (Window = 3)")
+
+    CompareSignals(
+        "MovingAvg_out1.txt",
+        result_indices,
+        result_values
+    )
+
+    # Moving Average Test 2: Window Size = 5
+    result_indices, result_values = moving_average(
+        indices, values, 5
+    )
+
+    print("\nMoving Average Test 2 (Window = 5)")
+
+    CompareSignals(
+        "MovingAvg_out2.txt",
+        result_indices,
+        result_values
+    )
+
+    # 3. First Derivative Test
+    indices, values = read_signal_file("Derivative_input.txt")
+
+    result_indices, result_values = first_derivative(
+        indices, values
+    )
+
+    print("\nFirst Derivative Test")
+
+    CompareSignals(
+        "1st_derivative_out.txt",
+        result_indices,
+        result_values
+    )
+
+
+    # 4. Second Derivative Test
+    result_indices, result_values = second_derivative(
+        indices, values
+    )
+
+    print("\nSecond Derivative Test")
+
+    CompareSignals(
+        "2nd_derivative_out.txt",
+        result_indices,
+        result_values
+    )
+
+
+    # 5. Convolution Test
+    indices1, values1 = read_signal_file("Conv1.txt")
+    indices2, values2 = read_signal_file("Conv2.txt")
+
+    result_indices, result_values = convolve_signals(
+        indices1, values1,
+        indices2, values2
+    )
+
+    print("\nConvolution Test")
+
+    CompareSignals(
+        "Conv_output.txt",
+        result_indices,
+        result_values
+    )
+
+
 
     print("\n--- All Tests Completed ---")

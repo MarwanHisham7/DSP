@@ -155,3 +155,44 @@ def Folding(Your_indices,Your_samples):
 # Folding(indicies,samples)  # call this function with your computed indicies and samples
 
 # %%
+
+def CompareSignals(expected_file, Your_indices, Your_samples):
+
+    expected_indices, expected_samples = ReadSignalFile(expected_file)
+
+    if len(expected_indices) != len(Your_indices):
+        print("Test Failed: Different indices length")
+        return False
+
+    if len(expected_samples) != len(Your_samples):
+        print("Test Failed: Different samples length")
+        return False
+
+    for i in range(len(expected_indices)):
+        if expected_indices[i] != Your_indices[i]:
+            print("Test Failed: Different indices")
+            return False
+
+    for i in range(len(expected_samples)):
+        if abs(expected_samples[i] - Your_samples[i]) >= 0.01:
+            print("Test Failed: Different values")
+            return False
+
+    print("Test Passed Successfully")
+    return True
+
+
+def MovingAverageTest(expected_file, indices, values):
+    return CompareSignals(expected_file, indices, values)
+
+
+def FirstDerivativeTest(expected_file, indices, values):
+    return CompareSignals(expected_file, indices, values)
+
+
+def SecondDerivativeTest(expected_file, indices, values):
+    return CompareSignals(expected_file, indices, values)
+
+
+def ConvolutionTest(expected_file, indices, values):
+    return CompareSignals(expected_file, indices, values)

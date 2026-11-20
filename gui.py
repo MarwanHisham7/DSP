@@ -1,9 +1,11 @@
 import os
 import customtkinter as ctk
+from tkinter import ttk
 from tkinter import filedialog, messagebox
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
 
 # Import operations from dsp_operations.py
 from dsp_operations import (
@@ -13,7 +15,12 @@ from dsp_operations import (
     fold_signal,
     add_signals,
     subtract_signals,
-    generate_sinusoidal_signal
+    generate_sinusoidal_signal,
+    quantize_signal,
+    moving_average,
+    first_derivative,
+    second_derivative,
+    convolve_signals
 )
 
 # Design Palette (Modern Slate Dark Theme)
@@ -183,6 +190,160 @@ class SubtractionSelectionModal(ctk.CTkToplevel):
         self.on_confirm(sig1, sig2)
 
 
+class QuantizationModal(ctk.CTkToplevel):
+    """Display quantization settings, table, and results."""
+
+    def __init__(self, parent, rows, indices, original,
+                 quantized, errors, codes, bits, levels, avg_power):
+        super().__init__(parent)
+
+        self.title("Quantization & Encoding Results")
+        self.geometry("1100x700")
+        self.configure(fg_color=BG_DARK)
+        self.transient(parent)
+
+        ctk.CTkLabel(
+            self,
+            text="Quantization & Encoding Results",
+            font=ctk.CTkFont(size=21, weight="bold"),
+            text_color=ACCENT_BLUE
+        ).pack(pady=(15, 5))
+
+        ctk.CTkLabel(
+            self,
+            text=f"Levels: {levels}    |    Bits: {bits}    |    "
+                 f"Average Quantization Error Power: {avg_power:.6f}",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color=ACCENT_GREEN
+        ).pack(pady=8)
+
+        # Table
+        table_frame = ctk.CTkFrame(self, fg_color=CARD_BG)
+        table_frame.pack(fill="both", expand=True, padx=15, pady=10)
+
+        columns = (
+            "n", "x", "interval", "xq",
+            "error", "error_squared", "code"
+        )
+
+        tree = ttk.Treeview(
+            table_frame,
+            columns=columns,
+            show="headings",
+            height=12
+        )
+
+        headings = {
+            "n": "n",
+            "x": "x(n)",
+            "interval": "Interval Index",
+            "xq": "xq(n)",
+            "error": "eq(n)",
+            "error_squared": "eq(n)^2",
+            "code": "Binary Code"
+        }
+
+        widths = {
+            "n": 55,
+            "x": 120,
+            "interval": 130,
+            "xq": 120,
+            "error": 120,
+            "error_squared": 130,
+            "code": 110
+        }
+
+        for col in columns:
+            tree.heading(col, text=headings[col])
+            tree.column(col, width=widths[col], anchor="center")
+
+        scrollbar = ttk.Scrollbar(
+            table_frame, orient="vertical", command=tree.yview
+        )
+        tree.configure(yscrollcommand=scrollbar.set)
+
+        tree.pack(side="left", fill="both", expand=True, padx=(8, 0), pady=8)
+        scrollbar.pack(side="right", fill="y", padx=(0, 8), pady=8)
+
+        for row in rows:
+            n, x, interval, xq, error, error2, code = row
+            tree.insert(
+                "", "end",
+                values=(
+                    n,
+                    f"{x:.6f}",
+                    interval,
+                    f"{xq:.6f}",
+                    f"{error:.6f}",
+                    f"{error2:.6f}",
+                    code
+                )
+            )
+
+        # Three result plots
+        plot_frame = ctk.CTkFrame(self, fg_color=CARD_BG)
+        plot_frame.pack(fill="both", expand=True, padx=15, pady=(0, 15))
+
+        fig, axes = plt.subplots(1, 3, figsize=(12, 3.2), dpi=85)
+        fig.patch.set_facecolor(CARD_BG)
+
+        for ax in axes:
+            ax.set_facecolor(BG_DARK)
+            ax.tick_params(colors=TEXT_PRIMARY, labelsize=8)
+            ax.grid(True, linestyle=":", alpha=0.25)
+            for spine in ax.spines.values():
+                spine.set_color("#555555")
+
+        # Original vs quantized signal
+        axes[0].plot(
+            indices, original, "o-",
+            color=ACCENT_BLUE, label="Original"
+        )
+        axes[0].step(
+            indices, quantized, where="mid",
+            color=ACCENT_GREEN, label="Quantized"
+        )
+        axes[0].set_title("Quantized Signal", color=TEXT_PRIMARY)
+        axes[0].legend(fontsize=7)
+
+        # Quantization error
+        axes[1].stem(
+            indices, errors,
+            linefmt=ACCENT_RED, markerfmt="o", basefmt=" "
+        )
+        axes[1].axhline(0, color="white", linewidth=0.8)
+        axes[1].set_title("Quantization Error", color=TEXT_PRIMARY)
+
+        # Encoded signal represented as a binary-code sequence
+        axes[2].set_title("Binary Encoding", color=TEXT_PRIMARY)
+        axes[2].set_xlabel("Sample Index", color=TEXT_PRIMARY)
+        axes[2].set_yticks([])
+        axes[2].set_xticks(indices)
+        axes[2].tick_params(axis="x", rotation=45)
+
+        for i, code in enumerate(codes):
+            axes[2].text(
+                indices[i], 0.5, code,
+                ha="center", va="center",
+                color=ACCENT_BLUE, fontsize=8,
+                fontweight="bold"
+            )
+
+        axes[2].set_ylim(0, 1)
+
+        fig.tight_layout(pad=2)
+
+        canvas = FigureCanvasTkAgg(fig, master=plot_frame)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill="both", expand=True, padx=5, pady=5)
+
+        self.protocol("WM_DELETE_WINDOW", lambda: self._close(fig))
+
+    def _close(self, fig):
+        plt.close(fig)
+        self.destroy()
+
+
 class DSPSignalProcessorApp(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -201,7 +362,7 @@ class DSPSignalProcessorApp(ctk.CTk):
         self.grid_rowconfigure(0, weight=1)
 
         # Left Sidebar Frame
-        self.sidebar = ctk.CTkFrame(self, width=340, corner_radius=0, fg_color=SIDEBAR_BG)
+        self.sidebar = ctk.CTkScrollableFrame(self, width=340, corner_radius=0, fg_color=SIDEBAR_BG)
         self.sidebar.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
 
         # Title Header
@@ -250,6 +411,76 @@ class DSPSignalProcessorApp(ctk.CTk):
 
         # Fold
         ctk.CTkButton(self.sidebar, text="🔄 Fold / Reverse x(-n)", command=self.handle_fold, fg_color="#3B82F6", height=34).pack(fill="x", padx=18, pady=4)
+
+
+        # Quantization & Encoding
+        ctk.CTkLabel(
+            self.sidebar,
+            text="Quantization & Encoding",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color=TEXT_PRIMARY
+        ).pack(anchor="w", padx=18, pady=(14, 4))
+
+        ctk.CTkButton(
+            self.sidebar,
+            text="📊 Quantize Signal",
+            command=self.open_quantization,
+            fg_color=ACCENT_GREEN,
+            hover_color="#059669",
+            height=34,
+            font=ctk.CTkFont(weight="bold")
+        ).pack(fill="x", padx=18, pady=4)
+
+
+        # Task 5 - Signal Processing
+        ctk.CTkLabel(
+            self.sidebar,
+            text="Task 5 - Signal Processing",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color=TEXT_PRIMARY
+        ).pack(anchor="w", padx=18, pady=(14, 4))
+
+        # Moving Average
+        avg_card = ctk.CTkFrame(self.sidebar, fg_color=CARD_BG)
+        avg_card.pack(fill="x", padx=18, pady=4)
+
+        ctk.CTkLabel(avg_card, text="Window Size:").pack(
+            side="left", padx=8
+        )
+
+        self.window_entry = ctk.CTkEntry(avg_card, width=55)
+        self.window_entry.insert(0, "3")
+        self.window_entry.pack(side="left", padx=5)
+
+        ctk.CTkButton(
+            avg_card,
+            text="Moving Average",
+            command=self.handle_moving_average,
+            width=120
+        ).pack(side="right", padx=8, pady=6)
+
+        # First Derivative
+        ctk.CTkButton(
+            self.sidebar,
+            text="First Derivative",
+            command=self.handle_first_derivative
+        ).pack(fill="x", padx=18, pady=4)
+
+        # Second Derivative
+        ctk.CTkButton(
+            self.sidebar,
+            text="Second Derivative",
+            command=self.handle_second_derivative
+        ).pack(fill="x", padx=18, pady=4)
+
+        # Convolution
+        ctk.CTkButton(
+            self.sidebar,
+            text="Convolution",
+            command=self.handle_convolution
+        ).pack(fill="x", padx=18, pady=4)
+
+
 
         # Multi-Signal Operations Header
         ctk.CTkLabel(self.sidebar, text="Multi-Signal Operations", font=ctk.CTkFont(size=13, weight="bold"), text_color=TEXT_PRIMARY).pack(anchor="w", padx=18, pady=(14, 4))
@@ -476,6 +707,240 @@ class DSPSignalProcessorApp(ctk.CTk):
             self.add_signal_to_workspace(f"Sub ({sig1_key} - {sig2_key})", ind, val)
 
         SubtractionSelectionModal(self, list(self.signals.keys()), execute_subtraction)
+
+    
+    def open_quantization(self):
+        target, indices, values = self.get_active_signal()
+
+        if indices is None:
+            return
+
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Quantization Settings")
+        dialog.geometry("400x330")
+        dialog.configure(fg_color=BG_DARK)
+        dialog.transient(self)
+        dialog.grab_set()
+
+        ctk.CTkLabel(
+            dialog,
+            text="Quantization Settings",
+            font=ctk.CTkFont(size=20, weight="bold")
+        ).pack(pady=(18, 12))
+
+        ctk.CTkLabel(
+            dialog,
+            text=f"Selected Signal: {target}"
+        ).pack(pady=4)
+
+        method = ctk.CTkOptionMenu(
+            dialog,
+            values=["Number of Bits", "Number of Levels"],
+            fg_color=ACCENT_BLUE,
+            button_color=ACCENT_BLUE
+        )
+        method.set("Number of Bits")
+        method.pack(fill="x", padx=30, pady=10)
+
+        amount_entry = ctk.CTkEntry(
+            dialog,
+            placeholder_text="Enter number",
+            fg_color=CARD_BG
+        )
+        amount_entry.insert(0, "2")
+        amount_entry.pack(fill="x", padx=30, pady=8)
+
+        def update_method(choice):
+            amount_entry.delete(0, "end")
+
+            if choice == "Number of Bits":
+                amount_entry.insert(0, "2")
+            else:
+                amount_entry.insert(0, "4")
+
+        method.configure(command=update_method)
+
+        def run_quantization():
+            try:
+                amount = int(amount_entry.get())
+
+                if method.get() == "Number of Bits":
+                    if not 1 <= amount <= 16:
+                        raise ValueError(
+                            "Bits must be between 1 and 16"
+                        )
+
+                    bits = amount
+                    levels = 2 ** bits
+
+                    result = quantize_signal(
+                        indices, values, bits=bits
+                    )
+
+                else:
+                    if not 2 <= amount <= 65536:
+                        raise ValueError(
+                            "Levels must be between 2 and 65536"
+                        )
+
+                    levels = amount
+                    bits = (levels - 1).bit_length()
+
+                    result = quantize_signal(
+                        indices, values, levels=levels
+                    )
+
+                rows, quantized, errors, squared, codes, avg_power = result
+
+                dialog.destroy()
+
+                self.add_signal_to_workspace(
+                    f"Quantized {target}",
+                    list(indices),
+                    quantized
+                )
+
+                self.add_signal_to_workspace(
+                    f"Quantization Error {target}",
+                    list(indices),
+                    errors
+                )
+
+                QuantizationModal(
+                    self,
+                    rows,
+                    list(indices),
+                    list(values),
+                    quantized,
+                    errors,
+                    codes,
+                    bits,
+                    levels,
+                    avg_power
+                )
+
+            except ValueError as e:
+                messagebox.showerror(
+                    "Quantization Error", str(e)
+                )
+
+        ctk.CTkButton(
+            dialog,
+            text="Run Quantization",
+            command=run_quantization,
+            fg_color=ACCENT_GREEN,
+            height=36
+        ).pack(fill="x", padx=30, pady=18)
+
+    
+    def handle_moving_average(self):
+        target, indices, values = self.get_active_signal()
+        if indices is None:
+            return
+
+        try:
+            window_size = int(self.window_entry.get())
+
+            ind, val = moving_average(indices, values, window_size)
+
+            self.add_signal_to_workspace(
+                f"Moving Average ({window_size}) of {target}",
+                ind, val
+            )
+
+        except ValueError as e:
+            messagebox.showerror("Error", str(e))
+
+
+    def handle_first_derivative(self):
+        target, indices, values = self.get_active_signal()
+        if indices is None:
+            return
+
+        try:
+            ind, val = first_derivative(indices, values)
+
+            self.add_signal_to_workspace(
+                f"First Derivative of {target}",
+                ind, val
+            )
+
+        except ValueError as e:
+            messagebox.showerror("Error", str(e))
+
+
+    def handle_second_derivative(self):
+        target, indices, values = self.get_active_signal()
+        if indices is None:
+            return
+
+        try:
+            ind, val = second_derivative(indices, values)
+
+            self.add_signal_to_workspace(
+                f"Second Derivative of {target}",
+                ind, val
+            )
+
+        except ValueError as e:
+            messagebox.showerror("Error", str(e))
+
+
+    def handle_convolution(self):
+        if len(self.signals) < 2:
+            messagebox.showwarning(
+                "Warning", "Load at least 2 signals first."
+            )
+            return
+
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Convolution")
+        dialog.geometry("380x260")
+        dialog.transient(self)
+        dialog.grab_set()
+
+        keys = list(self.signals.keys())
+
+        ctk.CTkLabel(
+            dialog, text="Select First Signal"
+        ).pack(pady=8)
+
+        combo1 = ctk.CTkOptionMenu(dialog, values=keys)
+        combo1.pack(pady=5)
+
+        ctk.CTkLabel(
+            dialog, text="Select Second Signal"
+        ).pack(pady=8)
+
+        combo2 = ctk.CTkOptionMenu(dialog, values=keys)
+        combo2.pack(pady=5)
+        combo2.set(keys[1])
+
+        def calculate():
+            sig1 = self.signals[combo1.get()]
+            sig2 = self.signals[combo2.get()]
+
+            try:
+                ind, val = convolve_signals(
+                    sig1["indices"], sig1["values"],
+                    sig2["indices"], sig2["values"]
+                )
+
+                dialog.destroy()
+
+                self.add_signal_to_workspace(
+                    "Convolution Result", ind, val
+                )
+
+            except ValueError as e:
+                messagebox.showerror("Error", str(e))
+
+        ctk.CTkButton(
+            dialog,
+            text="Calculate Convolution",
+            command=calculate
+        ).pack(pady=15)
+
 
 
 if __name__ == "__main__":
